@@ -2,6 +2,8 @@ import random
 import operator
 import bisect
 import json
+import math
+
 
 BEGIN = "___BEGIN__"
 END = "___END__"
@@ -23,7 +25,7 @@ class Chain(object):
     A Markov chain representing processes that have both beginnings and ends.
     For example: Sentences.
     """
-    def __init__(self, corpus, state_size, model=None):
+    def __init__(self, corpus, state_size, model=None, finite=True):
         """
         `corpus`: A list of lists, where each outer list is a "run"
         of the process (e.g., a single sentence), and each inner list
@@ -34,6 +36,7 @@ class Chain(object):
         `state_size`: An integer indicating the number of items the model
         uses to represent its state. For text generation, 2 or 3 are typical.
         """
+        self.finite = finite
         self.state_size = state_size
         self.model = model or self.build(corpus, self.state_size)
         self.precompute_begin_state()
@@ -47,15 +50,17 @@ class Chain(object):
         appears.
         """
         if (type(corpus) != list) or (type(corpus[0]) != list):
-            raise Exception("`corpus` must be list of lists")
+            raise ValueError("`corpus` must be list of lists")
 
         # Using a DefaultDict here would be a lot more convenient, however the memory
         # usage is far higher.
         model = {}
 
         for run in corpus:
-            items = ([ BEGIN ] * state_size) + run + [ END ]
-            for i in range(len(run) + 1):
+            items = ([ BEGIN ] * state_size) + run
+            if self.finite:
+                items.append(END)
+            for i in range(len(items) - state_size):
                 state = tuple(items[i:i+state_size])
                 follow = items[i+state_size]
                 if state not in model:
@@ -67,6 +72,10 @@ class Chain(object):
                 model[state][follow] += 1
         return model
 
+    @property
+    def initial_state(self):
+        return tuple([BEGIN] * self.state_size)
+
     def precompute_begin_state(self):
         """
         Caches the summation calculation and available choices for BEGIN * state_size.
@@ -77,6 +86,12 @@ class Chain(object):
         cumdist = list(accumulate(weights))
         self.begin_cumdist = cumdist
         self.begin_choices = choices
+
+    def entropy(self, state):
+        weights = self.model[state].values()
+        sum_weights = float(sum(weights))
+        return -sum(w/sum_weights * math.log(w/sum_weights, 2) for w in weights
+                    if w)
 
     def move(self, state):
         """
@@ -104,6 +119,15 @@ class Chain(object):
             if next_word == END: break
             yield next_word
             state = tuple(state[1:]) + (next_word,)
+
+    def gen_entropy(self, entropy, init_state=None):
+        state = init_state or self.initial_state
+        while entropy > 0:
+            print("State is {}".format(state))
+            entropy -= self.entropy(state)
+            next_entry = self.move(state)
+            yield next_entry
+            state = tuple(state[1:]) + (next_entry,)
 
     def walk(self, init_state=None):
         """
@@ -147,4 +171,3 @@ class Chain(object):
 
         inst = cls(None, state_size, rehydrated)
         return inst
-
