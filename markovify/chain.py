@@ -123,7 +123,6 @@ class Chain(object):
     def gen_entropy(self, entropy, init_state=None):
         state = init_state or self.initial_state
         while entropy > 0:
-            print("State is {}".format(state))
             entropy -= self.entropy(state)
             next_entry = self.move(state)
             yield next_entry
